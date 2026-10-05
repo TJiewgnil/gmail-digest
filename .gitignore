@@ -2,9 +2,12 @@
 .env
 *.env
 client_secret_*.json
+client_secret.json
+token.json
 inbox.json
 digest.md
 
 # python
 __pycache__/
 *.pyc
+*.pyo

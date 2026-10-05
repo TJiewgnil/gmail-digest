@@ -27,6 +27,7 @@ import os
 import secrets
 import socket
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -34,6 +35,10 @@ import webbrowser
 from gmail_common import SCOPES, TOKEN_URL, load_dotenv
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+
+
+class OAuthError(Exception):
+    """Raised when the OAuth loopback flow cannot produce a refresh token."""
 
 
 def _free_port():
@@ -44,24 +49,18 @@ def _free_port():
     return port
 
 
-def main():
-    load_dotenv()
-    ap = argparse.ArgumentParser(description="Obtain a Gmail API refresh token (one-time).")
-    ap.add_argument("--client-id", default=os.environ.get("GMAIL_CLIENT_ID"))
-    ap.add_argument("--client-secret", default=os.environ.get("GMAIL_CLIENT_SECRET"))
-    args = ap.parse_args()
-    if not args.client_id or not args.client_secret:
-        sys.stderr.write(
-            "ERROR: provide --client-id/--client-secret (or set "
-            "GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET in the environment or .env)\n"
-        )
-        sys.exit(2)
+def run_oauth_flow(client_id, client_secret):
+    """Run the loopback OAuth consent flow and return a refresh token.
 
+    Opens the browser, serves one localhost redirect, exchanges the code for
+    tokens and returns the refresh token. Raises OAuthError on any failure so
+    callers (e.g. setup.py) can handle it without a traceback.
+    """
     port = _free_port()
     redirect_uri = "http://localhost:{}/".format(port)
     state = secrets.token_urlsafe(16)
     auth_url = AUTH_URL + "?" + urllib.parse.urlencode({
-        "client_id": args.client_id,
+        "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": SCOPES,
@@ -80,7 +79,8 @@ def main():
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
-            self.wfile.write("授权完成，可以关闭此页面返回终端。".encode("utf-8"))
+            self.wfile.write(
+                "Authorization complete / 授权完成. You can close this tab.".encode("utf-8"))
 
         def log_message(self, *args):  # silence default logging
             pass
@@ -93,27 +93,51 @@ def main():
     httpd.handle_request()  # serve exactly one redirect, then stop
 
     if not captured.get("code") or captured.get("state") != state:
-        sys.stderr.write("ERROR: did not receive a valid authorization code.\n")
-        sys.exit(1)
+        raise OAuthError("did not receive a valid authorization code.")
 
     data = urllib.parse.urlencode({
         "code": captured["code"],
-        "client_id": args.client_id,
-        "client_secret": args.client_secret,
+        "client_id": client_id,
+        "client_secret": client_secret,
         "redirect_uri": redirect_uri,
         "grant_type": "authorization_code",
     }).encode("utf-8")
     req = urllib.request.Request(TOKEN_URL, data=data, method="POST")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        tok = json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            tok = json.load(resp)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise OAuthError("token exchange failed (HTTP {}): {}".format(e.code, body))
+    except urllib.error.URLError as e:
+        raise OAuthError("cannot reach {}: {}".format(TOKEN_URL, e.reason))
 
     refresh = tok.get("refresh_token")
     if not refresh:
+        raise OAuthError(
+            "no refresh_token returned. Google only returns one on the first "
+            "consent — revoke this app at https://myaccount.google.com/permissions "
+            "and run again.")
+    return refresh
+
+
+def main():
+    load_dotenv()
+    ap = argparse.ArgumentParser(description="Obtain a Gmail API refresh token (one-time).")
+    ap.add_argument("--client-id", default=os.environ.get("GMAIL_CLIENT_ID"))
+    ap.add_argument("--client-secret", default=os.environ.get("GMAIL_CLIENT_SECRET"))
+    args = ap.parse_args()
+    if not args.client_id or not args.client_secret:
         sys.stderr.write(
-            "ERROR: no refresh_token returned. Google only returns one on the first\n"
-            "consent — revoke this app at https://myaccount.google.com/permissions\n"
-            "and run again.\n"
+            "ERROR: provide --client-id/--client-secret (or set "
+            "GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET in the environment or .env)\n"
         )
+        sys.exit(2)
+
+    try:
+        refresh = run_oauth_flow(args.client_id, args.client_secret)
+    except OAuthError as e:
+        sys.stderr.write("ERROR: " + str(e) + "\n")
         sys.exit(1)
 
     print("\n=== SUCCESS ===")

@@ -9,13 +9,14 @@ normal mailbox read.
 Credentials: see gmail_common.py (OAuth client id/secret + refresh token).
 
 Usage:
-    python fetch_inbox.py [--hours 24] [--label INBOX] [--max 200]
+    python fetch_inbox.py [--hours 24] [--label INBOX] [--max 200] [--query "..."]
 
 Notes:
 - Read-only: only messages.list + messages.get are used; nothing is modified.
 - Standard library only; no pip install needed.
-- Since QQ and Chalmers mail is forwarded into Gmail, reading the Gmail INBOX
-  covers all three accounts. Source can be inferred from `from_addr`.
+- When mail from other providers is forwarded into this Gmail account, reading
+  the Gmail INBOX covers all of them at once. The source of each message can be
+  inferred from `from_addr`.
 """
 import argparse
 import base64
@@ -117,10 +118,13 @@ def extract_body(msg, limit=2000):
     return " ".join(text.split())[:limit]
 
 
-def list_message_ids(token, after_epoch, label, limit):
+def list_message_ids(token, after_epoch, label, limit, query=None):
     """Return up to `limit` message ids newer than after_epoch, newest first."""
     ids = []
-    params = {"q": "after:{}".format(after_epoch), "maxResults": 100}
+    q = "after:{}".format(after_epoch)
+    if query:
+        q += " " + query  # advanced Gmail search passthrough, e.g. 'is:unread -category:promotions'
+    params = {"q": q, "maxResults": 100}
     if label:
         params["labelIds"] = label
     page_token = None
@@ -151,6 +155,9 @@ def main():
     ap.add_argument("--label", "--folder", dest="label", default="INBOX",
                     help="Gmail label to read (default INBOX)")
     ap.add_argument("--max", type=int, default=200, help="cap number of messages (default 200)")
+    ap.add_argument("--query", default=None,
+                    help="extra Gmail search terms, ANDed with the time window "
+                         "(e.g. 'is:unread -category:promotions')")
     args = ap.parse_args()
 
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=args.hours)
@@ -159,7 +166,7 @@ def main():
 
     token = get_access_token()
     label = args.label.upper() if args.label else None
-    ids = list_message_ids(token, after_epoch, label, args.max)
+    ids = list_message_ids(token, after_epoch, label, args.max, args.query)
 
     messages = []
     for msg_id in ids:  # Gmail returns newest first
