@@ -1,0 +1,10 @@
+# secrets & runtime data — never commit
+.env
+*.env
+client_secret_*.json
+inbox.json
+digest.md
+
+# python
+__pycache__/
+*.pyc
