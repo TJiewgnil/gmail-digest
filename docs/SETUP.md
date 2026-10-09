@@ -14,9 +14,8 @@ Everything after that is automated by `python setup.py`.
 - **Python 3.8+** (standard library only — no `pip install`).
 - A **Gmail account** that will receive all your mail (set up forwarding later;
   see [Forwarding](FORWARDING.md)).
-- For the GitHub Actions / local paths: an **Anthropic API key**
-  (<https://console.anthropic.com/>).
-- Optional, for auto-pushing CI secrets: the **GitHub CLI** (`gh`).
+- A **Claude Code** account with access to cloud routines
+  (<https://claude.ai/code>), and a **GitHub** account to host this repo.
 
 ---
 
@@ -61,73 +60,43 @@ It will:
 
 1. auto-detect `client_secret_*.json` and read the client id/secret,
 2. open your browser for Google consent → obtain a **refresh token**,
-3. ask for `GMAIL_USER`, `ANTHROPIC_API_KEY`, model, recipient, look-back hours,
+3. ask for `GMAIL_USER` and an optional recipient override,
 4. write `.env` (git-ignored),
 5. **self-test**: fetch the last 24h (read) and send a test digest email,
-6. optionally run `gh secret set` to push your GitHub Actions secrets,
-7. print the next steps for the deployment you choose.
+6. print the next steps for creating the cloud routine.
 
 Prefer to do it by hand? Run `python gmail_oauth_setup.py --client-id <id>
 --client-secret <secret>`, then copy `.env.example` → `.env` and fill it in.
 
 ---
 
-## 3. Pick a deployment
+## 3. Create the Claude Code cloud routine
 
-### 3a. GitHub Actions + Anthropic API (primary, recommended)
+Claude is the summarizer, so there is no API key and no summarizer script — the
+routine just follows `ROUTINE.md`.
 
-Runs in the cloud on a schedule — nothing stays on your machine.
-
-1. Push this repo to GitHub.
-2. Set these **Actions secrets** (*Settings → Secrets and variables → Actions*),
-   or let `setup.py` push them with `gh`:
+1. **Push this repo to GitHub** (a private repo is fine) and connect it to
+   Claude Code on the web (<https://claude.ai/code>).
+2. **Create a cloud environment** for the routine and add these as environment
+   secrets (values are in the `.env` the wizard wrote):
    `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`,
-   `GMAIL_USER`, `ANTHROPIC_API_KEY`.
-   Optional **variables** (same screen, "Variables" tab): `ANTHROPIC_MODEL`,
-   `DIGEST_TO`, `DIGEST_HOURS`.
-3. Edit the cron in `.github/workflows/daily-digest.yml`.
-   > ⏰ **Cron is UTC and ignores daylight saving.** A fixed UTC time drifts ±1h
-   > across DST in your local clock. Pick the UTC time that matches your desired
-   > local time, e.g. `0 7 * * *` = 07:00 UTC = 08:00 CET / 09:00 CEST. Adjust
-   > twice a year if you need it pinned to local time.
-4. Test it: *Actions → Daily Email Digest → Run workflow*.
+   `GMAIL_USER`, and optionally `DIGEST_TO`.
+3. **Create a daily routine** (run `/schedule` in Claude Code, or use the
+   routines page on claude.ai) on this repo + environment, with a prompt like:
+   > Follow the instructions in ROUTINE.md.
 
-### 3b. Claude Code routine (no API key)
-
-Here Claude Code is the summarizer, so you do **not** need `ANTHROPIC_API_KEY`
-or `summarize.py`.
-
-1. Open this repo in Claude Code / claude.ai.
-2. Use `/schedule` to create a daily routine whose prompt follows `ROUTINE.md`:
-   it runs `python fetch_inbox.py --hours 24`, summarizes per the rules, writes
-   `digest.md`, and runs `python send_digest.py digest.md`.
-3. The digest is also emitted as the routine's own output, so you can review it
-   in the routine history.
-
-Store `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`,
-`GMAIL_USER` as environment secrets for the routine.
-
-### 3c. Local cron / Task Scheduler
-
-Runs on your own always-on machine. Needs `ANTHROPIC_API_KEY` in `.env`.
-
-- **macOS / Linux:**
-  ```bash
-  ./run_local.sh          # one-shot test
-  ```
-  Then add a crontab entry (`crontab -e`):
-  ```cron
-  0 8 * * *  cd /path/to/gmail-digest && ./run_local.sh >> digest.log 2>&1
-  ```
-  Local cron uses your machine's local time (no UTC conversion needed).
-
-- **Windows:**
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\run_local.ps1
-  ```
-  Then create a **Task Scheduler** Basic Task (daily) with:
-  - Program: `powershell.exe`
-  - Arguments: `-ExecutionPolicy Bypass -File "C:\path\to\gmail-digest\run_local.ps1"`
+   Per `ROUTINE.md`, each run executes `python fetch_inbox.py --hours 24`,
+   summarizes the mail, writes `digest.md`, runs
+   `python send_digest.py digest.md`, and also prints the digest as the
+   routine's own output so you can review it in the routine history.
+   `.claude/settings.json` pre-approves running `python` so the unattended run
+   never stalls on a permission prompt.
+   > ⏰ **The routine's cron is UTC and ignores daylight saving.** A fixed UTC
+   > time drifts ±1h in your local clock across DST, e.g. `0 10 * * *` is 12:00
+   > CEST in summer but 11:00 CET in winter. Adjust twice a year if you want it
+   > pinned to local time.
+4. **Test it:** trigger a manual run of the routine and check that the digest
+   arrives.
 
 ---
 
@@ -143,7 +112,7 @@ recipe, and the lesson about Android push, is in
 
 `ROUTINE.md` holds your filtering priorities, source mapping, output format, and
 language. Edit it to taste — it's the single place that controls what the digest
-looks like, for all three deployments.
+looks like.
 
 ---
 
@@ -151,17 +120,16 @@ looks like, for all three deployments.
 
 - `python -m py_compile *.py` — all scripts compile.
 - `python fetch_inbox.py --hours 24` — prints inbox JSON.
-- `python summarize.py inbox.json` — prints a digest (needs `ANTHROPIC_API_KEY`).
 - `python send_digest.py digest.md` — the test email arrives at your `+digest`
   alias / `DIGEST_TO`.
-- GitHub Actions: `workflow_dispatch` run is green and the digest arrives.
+- A manual run of the routine finishes and the digest arrives.
 
 ## Troubleshooting
 
 - **`403 access_denied`** → add yourself as a Test user (step 1.3).
 - **No `refresh_token` returned** → Google only returns one on first consent.
   Revoke the app at <https://myaccount.google.com/permissions> and re-run.
-- **`401` from Anthropic** → check `ANTHROPIC_API_KEY`.
-- **`429` from Anthropic** → rate-limited or out of credit; retry later.
-- **Chinese/emoji look garbled on Windows** → the scripts force UTF-8; make sure
-  you run them via `run_local.ps1` (which sets the console encoding).
+- **Routine run says `GMAIL_CLIENT_ID is not set`** → the secrets are missing
+  from the routine's cloud environment (step 3.2).
+- **Chinese/emoji look garbled on Windows** (local runs only) → set
+  `PYTHONUTF8=1` before running the scripts.

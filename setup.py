@@ -13,15 +13,13 @@ Then: `python setup.py`. The wizard will:
   2. run the OAuth loopback flow → obtain a refresh token,
   3. write a .env with every value filled in,
   4. self-test: fetch the last 24h (read) and send a test digest (send),
-  5. optionally push the secrets to GitHub Actions with `gh` (if installed),
-  6. print the next steps for the deployment you choose.
+  5. print the next steps for creating the Claude Code cloud routine.
 
 Standard library only; no pip install needed.
 """
 import glob
 import json
 import os
-import shutil
 import subprocess
 import sys
 
@@ -141,64 +139,18 @@ def self_test(values):
     return True
 
 
-def gh_push_secrets(values):
-    if not shutil.which("gh"):
-        print("`gh` not found — skip (set the 5 secrets manually; see docs/SETUP.md).")
-        return
-    if not yesno("Push secrets to GitHub Actions with `gh secret set`?", default=False):
-        return
-    repo = prompt("  GitHub repo (owner/name, blank = current dir's remote)",
-                  default="", allow_empty=True)
-    secret_keys = ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN",
-                   "GMAIL_USER", "ANTHROPIC_API_KEY"]
-    for key in secret_keys:
-        val = values.get(key)
-        if not val:
-            print("  skip {} (no value)".format(key))
-            continue
-        cmd = ["gh", "secret", "set", key, "--body", val]
-        if repo:
-            cmd += ["--repo", repo]
-        rc, out, err = run(cmd)
-        print("  {} {}".format("OK " if rc == 0 else "FAIL", key)
-              + ("" if rc == 0 else ": " + (err or out).strip()))
-    # Optional extra config as repository variables.
-    for key in ("ANTHROPIC_MODEL", "DIGEST_TO", "DIGEST_HOURS"):
-        val = values.get(key)
-        if not val:
-            continue
-        cmd = ["gh", "variable", "set", key, "--body", val]
-        if repo:
-            cmd += ["--repo", repo]
-        run(cmd)
-
-
-def print_next_steps(choice):
+def print_next_steps():
     print("\n==================  NEXT STEPS  ==================")
-    if choice == "1":
-        print(
-            "GitHub Actions + Anthropic API:\n"
-            "  1. Commit & push this repo to GitHub.\n"
-            "  2. Ensure these secrets exist (the wizard can set them, or do it in\n"
-            "     Settings > Secrets and variables > Actions):\n"
-            "       GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN,\n"
-            "       GMAIL_USER, ANTHROPIC_API_KEY\n"
-            "  3. Edit the cron in .github/workflows/daily-digest.yml (UTC!).\n"
-            "  4. Actions tab > Daily Email Digest > Run workflow to test.\n"
-            "  See docs/SETUP.md section 3a.")
-    elif choice == "2":
-        print(
-            "Claude Code routine (no API key needed):\n"
-            "  1. Point Claude Code / claude.ai at this repo.\n"
-            "  2. Use /schedule with a prompt that follows ROUTINE.md.\n"
-            "  See docs/SETUP.md section 3b.")
-    else:
-        print(
-            "Local cron / Task Scheduler:\n"
-            "  - macOS/Linux: run ./run_local.sh (needs ANTHROPIC_API_KEY in .env),\n"
-            "    then add a crontab entry.\n"
-            "  - Windows: run run_local.ps1, then add a Task Scheduler task.\n"
-            "  See docs/SETUP.md section 3c.")
+    print(
+        "Create the Claude Code cloud routine:\n"
+        "  1. Push this repo to GitHub and connect it at https://claude.ai/code.\n"
+        "  2. Create a cloud environment with these secrets (values are in .env):\n"
+        "       GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN,\n"
+        "       GMAIL_USER (and DIGEST_TO if you set it)\n"
+        "  3. /schedule a daily routine with the prompt\n"
+        "       \"Follow the instructions in ROUTINE.md.\"  (cron is UTC!)\n"
+        "  4. Trigger a manual run to test.\n"
+        "  See docs/SETUP.md section 3.")
     print("\nThen: configure phone notifications (docs/NOTIFICATIONS.md) and\n"
           "customize ROUTINE.md to your own filtering/summary rules.")
     print("=================================================")
@@ -227,41 +179,23 @@ def main():
     # 3. Remaining config.
     print()
     user = os.environ.get("GMAIL_USER") or prompt("Your Gmail address (GMAIL_USER)")
-    anthropic_key = prompt(
-        "Anthropic API key (ANTHROPIC_API_KEY) — needed for GitHub Actions / local; "
-        "leave blank for the Claude Code routine path",
-        default=os.environ.get("ANTHROPIC_API_KEY", ""), allow_empty=True)
-    model = prompt("Anthropic model (ANTHROPIC_MODEL)",
-                   default=os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5"))
     digest_to = prompt("Digest recipient (DIGEST_TO) — blank = <user>+digest alias",
                        default=os.environ.get("DIGEST_TO", ""), allow_empty=True)
-    digest_hours = prompt("Look-back window in hours (DIGEST_HOURS)",
-                          default=os.environ.get("DIGEST_HOURS", "24"))
 
     values = {
         "GMAIL_CLIENT_ID": cid,
         "GMAIL_CLIENT_SECRET": csecret,
         "GMAIL_REFRESH_TOKEN": refresh,
         "GMAIL_USER": user,
-        "ANTHROPIC_API_KEY": anthropic_key,
-        "ANTHROPIC_MODEL": model,
         "DIGEST_TO": digest_to,
-        "DIGEST_HOURS": digest_hours,
     }
 
     # 4. Write .env + self-test.
     write_env(values)
     self_test(values)
 
-    # 5. Deployment choice + optional gh secret push.
-    print("\nWhich deployment do you want?")
-    print("  1) GitHub Actions + Anthropic API (primary)")
-    print("  2) Claude Code routine")
-    print("  3) Local cron / Task Scheduler")
-    choice = prompt("Choice", default="1")
-    if choice == "1":
-        gh_push_secrets(values)
-    print_next_steps(choice)
+    # 5. Next steps.
+    print_next_steps()
     print("\nDone.")
 
 

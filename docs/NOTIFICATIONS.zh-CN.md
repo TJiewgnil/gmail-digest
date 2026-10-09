@@ -55,7 +55,7 @@
 
 ## 快速测试
 
-运行 `python send_digest.py digest.md`（或触发你的部署），确认：
+运行 `python send_digest.py digest.md`（或手动触发一次 routine），确认：
 1. 邮件出现在**收件箱**里并带有 `Digest` 标签；
 2. 一两分钟内手机弹出通知。
 

@@ -68,7 +68,7 @@ is still the safe choice.)
 
 ## Quick test
 
-Run `python send_digest.py digest.md` (or trigger your deployment) and confirm:
+Run `python send_digest.py digest.md` (or trigger a manual routine run) and confirm:
 1. the message appears **in the Inbox** with the `Digest` label, and
 2. your phone shows a notification within a minute or two.
 

@@ -1,0 +1,11 @@
+{
+  "_comment": "Lets the Claude Code cloud routine run the python scripts non-interactively. Grants permission to run python and read/write files in THIS repo only.",
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Read",
+      "Write"
+    ]
+  }
+}
